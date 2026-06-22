@@ -25,38 +25,38 @@ class TSPSolver:
         self.dist_matrix = cdist(self.cities, self.cities)
 
     # ------------------------------------------------------------------
-    # 1. クラスタリング O(NlogN * split_num^2)
+    # 1. クラスタリング
     # ------------------------------------------------------------------
     
-    def split_on_x_axis(self, city_id_list):
+    def split_by_x(self, city_id_list):
         sorted_city_id_list = sorted(city_id_list, key=lambda id: self.cities[id][0])
         return list(np.array_split(sorted_city_id_list, self.split_num))
 
-    def split_on_y_axis(self, city_id_list):
+    def split_by_y(self, city_id_list):
         sorted_city_id_list = sorted(city_id_list, key=lambda id: self.cities[id][1])
         return list(np.array_split(sorted_city_id_list, self.split_num))
 
     def make_clusters(self):
         city_id_list = list(range(len(self.cities)))
 
-        clusters_on_x_axis = self.split_on_x_axis(city_id_list)
+        x_split_clusters = self.split_by_x(city_id_list)
 
-        clusters_on_both_axis = []
-        for cluster in clusters_on_x_axis:
-            clusters_on_both_axis.extend(self.split_on_y_axis(cluster))
+        xy_split_clusters = []
+        for cluster in x_split_clusters:
+            xy_split_clusters.extend(self.split_by_y(cluster))
 
-        self.clusters = clusters_on_both_axis
+        self.clusters = xy_split_clusters
         return all([len(cluster) >= 4 for cluster in self.clusters])
 
 
     # ------------------------------------------------------------------
-    # 距離・グラフの基本操作
+    # 距離の計算
     # ------------------------------------------------------------------
     def calc_dist_of_cities(self, city_id_1, city_id_2):
         return self.dist_matrix[city_id_1, city_id_2]
     
     # ------------------------------------------------------------------
-    # 2. 各クラスタ内の部分巡回路作成 O(N^2)
+    # 2. 各クラスタ内の部分巡回路を作成
     # ------------------------------------------------------------------
     def greedy(self, cluster_id):
         INF = 10**9
@@ -67,7 +67,7 @@ class TSPSolver:
         cur_city_id = root_id
         visited[root_id] = True
 
-        tour = [cur_city_id]
+        city_id_tour = [cur_city_id]
 
         while True:
             min_dist = INF
@@ -84,24 +84,25 @@ class TSPSolver:
             if next_city_id == -1:
                 break
 
-            tour.append(next_city_id)
+            city_id_tour.append(next_city_id)
             cur_city_id = next_city_id
             visited[cur_city_id] = True
 
-        self.tours.append(tour)
+        self.tours.append(city_id_tour)
 
 
     # ------------------------------------------------------------------
-    # 3. 部分巡回路を 2-opt 法で改善 O(10^6)
+    # 3. 部分巡回路を 2-opt 法 + 焼きなまし法で改善
     # ------------------------------------------------------------------
 
-    ## path1: id1⇔id2, path2: id3⇔id4 を id1⇔id3, id2⇔id4 と交換した方が巡回路長が短くなる場合交換する. 
-    ## id1⇔id4, id2⇔id3 と交換するとグラフが連結でなくなるので不可.
-    def swap_path_if_shorter(self, tour, id_list):
+    # path1: id1⇔id2, path2: id3⇔id4 を id1⇔id3, id2⇔id4 と交換した方が巡回路長が短くなる場合交換する. 
+    # id1⇔id4, id2⇔id3 と交換するとグラフが連結でなくなるので不可.
+    def swap_path_if_shorter(self, cluster_id, path1, path2):
         self.temperature *= self.cooling_rate
 
-        tour_id1, tour_id2, tour_id3, tour_id4 = id_list
-        city_id1, city_id2, city_id3, city_id4 = [tour[i] for i in id_list]
+        tour_id1, tour_id2 = path1
+        tour_id3, tour_id4 = path2
+        city_id1, city_id2, city_id3, city_id4 = [self.tours[cluster_id][i] for i in id_list]
 
         cur_path_length = self.calc_dist_of_cities(city_id1, city_id2) + self.calc_dist_of_cities(city_id3, city_id4)
         new_path_length = self.calc_dist_of_cities(city_id1, city_id3) + self.calc_dist_of_cities(city_id2, city_id4)
@@ -112,35 +113,36 @@ class TSPSolver:
             if P < random_num:   
                 return
 
-        tour[tour_id2:tour_id3 + 1] = reversed(tour[tour_id2:tour_id3 + 1])
+        # tour_id2 ~ tour_id3 の間を反転
+        self.tours[cluster_id][tour_id2:tour_id3 + 1] = self.tours[cluster_id][tour_id2:tour_id3 + 1][::-1]
 
     def apply_2opt_with_sa(self, cluster_id):
-        tour = self.tours[cluster_id]
         self.temperature = self.temperature_initial
+
+        tour_length = len(self.tours[cluster_id])
         while self.temperature > self.temperature_limit:
-            tour_id1 = random.randint(0, len(tour)-1)
-            tour_id3 = random.randint(0, len(tour)-1)
+            # tours[cluster_id] のインデックス tour_id をランダムに選び、path1: tour_id1⇔tour_id2, path2: tour_id3⇔tour_id4 を決定
+            tour_id1 = random.randint(0, tour_length-1)
+            tour_id3 = random.randint(0, tour_length-1)
 
             if tour_id1 > tour_id3:
                 tour_id3, tour_id1 = tour_id1, tour_id3
 
-            tour_id2 = (tour_id1 + 1) % len(tour)
-            tour_id4 = (tour_id3 + 1) % len(tour)
+            tour_id1 = (tour_id1 + 1) % tour_length
+            tour_id4 = (tour_id3 + 1) % tour_length
 
-            id_list = [tour_id1, tour_id2, tour_id3, tour_id4]
-            if tour_id3 - tour_id1 < 2 or (tour_id1 == 0 and tour_id3 == len(tour) - 1):
+            # tour_id が被っていないことを確認
+            if tour_id3 - tour_id1 < 2 or (tour_id1 == 0 and tour_id4 == 0):
                 continue
             
-            self.swap_path_if_shorter(tour, (tour_id1, tour_id2, tour_id3, tour_id4))
+            self.swap_path_if_shorter(cluster_id, (tour_id1, tour_id2), (tour_id3, tour_id4))
         
-        self.tours[cluster_id] = tour
-
 
     # ------------------------------------------------------------------
-    # 作成した部分巡回路の評価 O(N)
+    # 巡回路の操作
     # ------------------------------------------------------------------
 
-    ## 指定のクラスターを巡回するパスを配列に書き出す. 
+    # 指定のクラスターを巡回するパスを配列に書き出す. ex. tour=[0, 1, 2] → path_tour=[(0,1),(1,2),(2,0)]
     def tour_to_path_tour(self, cluster_id):
         tour = self.tours[cluster_id]
         if tour is None:
@@ -153,6 +155,7 @@ class TSPSolver:
 
         return path_tour
 
+    # tour を回転して start_city_id から始まる配列にする
     def rotate_tour(self, tour, start_city_id):
         start_tour_id = -1
         for tour_id in range(len(tour)):
@@ -162,11 +165,11 @@ class TSPSolver:
         tour[:] =  tour[start_tour_id:] + tour[:start_tour_id]
 
     # ------------------------------------------------------------------
-    # 3. クラスタ同士の結合 O(N ^ 2 * split_num ^ 2)
+    # 3. クラスタ同士の結合
     # ------------------------------------------------------------------
-    ## path1 と path2（2つは別のクラスターのパス）を繋ぎ替えた場合に, 全体の巡回路の長さがどれくらい増えるか計算する. 増えるとき正の数を返す.
-    ## また, path1: id1⇔id2, path2: id3⇔id4 を id1⇔id3, id2⇔id4 と繋ぎ替えても id1⇔id4, id2⇔id3 と繋ぎ替えてもよいので,
-    ## id1⇔id3, id2⇔id4 とした方が全体の巡回路が短くなる場合 "1to3_and_2to4" を, 他方の場合は "1to4_and_2to3" を返す.
+    # path1 と path2（2つは別のクラスターのパス）を繋ぎ替えた場合に, 全体の巡回路の長さがどれくらい増えるか計算する. 増えるとき正の数を返す.
+    # また, path1: id1⇔id2, path2: id3⇔id4 を id1⇔id3, id2⇔id4 と繋ぎ替えても id1⇔id4, id2⇔id3 と繋ぎ替えてもよいので,
+    # id1⇔id3, id2⇔id4 とした方が全体の巡回路が短くなる場合 "1to3_and_2to4" を, 他方の場合は "1to4_and_2to3" を返す.
     def calc_decrease_dist_and_better_swapping_way(self, path1, path2):
         city_id1, city_id2 = path1
         city_id3, city_id4 = path2
@@ -179,56 +182,54 @@ class TSPSolver:
             return (dist_1to3_and_2to4 - cur_dist, "1to3_and_2to4")
         return (dist_1to4_and_2to3 - cur_dist, "1to4_and_2to3")
 
+    # clusters[0] に他の cluster を順に結合する
     def join_clusters(self):
         INF = 10**9
 
-        while len(self.tours) > 1:
+        while True:
+            # clusters[0] のパス(path0)と、clusters[0] に結合されていない cluster のパス(path1)の組み合わせ
+            # のうち、結合したとき最も巡回路全体の長さが減るもの(best_choice)を探索
             best_choice = {
                 'decrease_dist': INF,
                 'way': None,
             }
 
             for path0 in self.tour_to_path_tour(0):
-                for cluster_id in range(1, len(self.tours)):
-                    for path1 in self.tour_to_path_tour(cluster_id):
+                for other_cluster_id in range(1, len(self.tours)):
+                    for path1 in self.tour_to_path_tour(other_cluster_id):
                         decrease_dist, way = self.calc_decrease_dist_and_better_swapping_way(path0, path1)
                         if decrease_dist < best_choice['decrease_dist']:
                             best_choice = {
                                 'decrease_dist': decrease_dist,
                                 'path0': path0,
                                 'path1': path1,
-                                'cluster_id': cluster_id,
+                                'cluster_id': other_cluster_id,
                                 'way': way,
                             }
 
-            if best_choice['way'] == "1to3_and_2to4":
-                id1, id2 = best_choice['path0']
-                id3, id4 = best_choice['path1']
-                cluster_id = best_choice['cluster_id']
-                self.rotate_tour(self.tours[0], id2)
-                self.rotate_tour(self.tours[cluster_id], id4)
-                self.tours[cluster_id].reverse()
-                self.tours[0].extend(self.tours[cluster_id])
-                self.tours[cluster_id] = None
-
-            elif best_choice['way'] == "1to4_and_2to3":
-                id1, id2 = best_choice['path0']
-                id3, id4 = best_choice['path1']
-                cluster_id = best_choice['cluster_id']
-                self.rotate_tour(self.tours[0], id2)
-                self.rotate_tour(self.tours[cluster_id], id4)
-                self.tours[0].extend(self.tours[cluster_id])
-                self.tours[cluster_id] = None
-            else:
+            if best_choice['way'] is None:
+                # best_choice が初期状態なら前クラスターが結合できている
                 break
+
+            id1, id2 = best_choice['path0']
+            id3, id4 = best_choice['path1']
+            cluster_id = best_choice['cluster_id']
+            self.rotate_tour(self.tours[0], id2)    # [id2 ... id1]
+            self.rotate_tour(self.tours[cluster_id], id4)    # [id4 ... id3]
+
+            if best_choice['way'] == "1to3_and_2to4":
+                self.tours[cluster_id].reverse()
+
+            self.tours[0].extend(self.tours[cluster_id])
+            self.tours[cluster_id] = None
 
         self.tours = [tour for tour in self.tours if tour is not None]
         self.clusters = [list(range(len(self.cities)))]
 
     # ------------------------------------------------------------------
-    # 補助表示・評価 O(N)
+    # 補助表示・評価
     # ------------------------------------------------------------------
-    def plot_graph(self, graph_name=""):
+    def plot_tour(self, graph_name=""):
         for i in range(len(self.clusters)):
             city_id_tour = self.tours[i]
 
@@ -242,7 +243,7 @@ class TSPSolver:
         plt.savefig(f'graph_{graph_name}.png')
         plt.close()
 
-    ## 指定のクラスターの部分巡回路長を計算. 
+    # 指定のクラスターの部分巡回路長を計算. 
     def calc_tour_length(self, cluster_id=0):
         path_tour = self.tour_to_path_tour(cluster_id)
         tour_length = 0
@@ -261,12 +262,12 @@ class TSPSolver:
         for cluster_id in range(len(self.clusters)):
             self.greedy(cluster_id)
             self.apply_2opt_with_sa(cluster_id)
-        self.plot_graph(f"greedy_{self.split_num}")
+        # self.plot_tour(f"greedy_{self.split_num}")
 
         self.join_clusters()
-        self.plot_graph(f"joint_{self.split_num}")
+        # self.plot_tour(f"joint_{self.split_num}")
 
-        print(self.split_num,": ",self.calc_tour_length())
+        # print(self.split_num,": ",self.calc_tour_length())
 
         return (True, self.tours[0], self.calc_tour_length())
 
@@ -284,7 +285,7 @@ def solve(cities):
             best_tour_length = tour_length
             best_tour = tour
 
-    print("best", best_tour_length)
+    print("best: ", best_tour_length)
 
     return best_tour_length
 
@@ -293,4 +294,4 @@ def solve(cities):
 if __name__ == '__main__':
     assert len(sys.argv) > 1
     tour = solve(read_input(sys.argv[1]))
-    # print_tour(tour)
+    print_tour(tour)
