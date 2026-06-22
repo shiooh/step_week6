@@ -48,7 +48,6 @@ class TSPSolver:
         self.clusters = xy_split_clusters
         return all([len(cluster) >= 4 for cluster in self.clusters])
 
-
     # ------------------------------------------------------------------
     # 距離の計算
     # ------------------------------------------------------------------
@@ -97,11 +96,10 @@ class TSPSolver:
 
     # path1: id1⇔id2, path2: id3⇔id4 を id1⇔id3, id2⇔id4 と交換した方が巡回路長が短くなる場合交換する. 
     # id1⇔id4, id2⇔id3 と交換するとグラフが連結でなくなるので不可.
-    def swap_path_if_shorter(self, cluster_id, path1, path2):
+    def swap_path_if_shorter(self, cluster_id, id_list):
         self.temperature *= self.cooling_rate
 
-        tour_id1, tour_id2 = path1
-        tour_id3, tour_id4 = path2
+        tour_id1, tour_id2, tour_id3, tour_id4 = id_list
         city_id1, city_id2, city_id3, city_id4 = [self.tours[cluster_id][i] for i in id_list]
 
         cur_path_length = self.calc_dist_of_cities(city_id1, city_id2) + self.calc_dist_of_cities(city_id3, city_id4)
@@ -128,14 +126,14 @@ class TSPSolver:
             if tour_id1 > tour_id3:
                 tour_id3, tour_id1 = tour_id1, tour_id3
 
-            tour_id1 = (tour_id1 + 1) % tour_length
+            tour_id2 = (tour_id1 + 1) % tour_length
             tour_id4 = (tour_id3 + 1) % tour_length
 
             # tour_id が被っていないことを確認
             if tour_id3 - tour_id1 < 2 or (tour_id1 == 0 and tour_id4 == 0):
                 continue
             
-            self.swap_path_if_shorter(cluster_id, (tour_id1, tour_id2), (tour_id3, tour_id4))
+            self.swap_path_if_shorter(cluster_id, (tour_id1, tour_id2, tour_id3, tour_id4))
         
 
     # ------------------------------------------------------------------
@@ -286,9 +284,7 @@ def solve(cities):
             best_tour = tour
 
     print("best: ", best_tour_length)
-
     return best_tour_length
-
 
 
 if __name__ == '__main__':
